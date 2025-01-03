@@ -9,9 +9,12 @@ extern crate nalgebra as na;
 use na::Vector3;
 
 extern crate indicatif;
-use indicatif::ProgressBar;
+use indicatif::{ProgressBar, MultiProgress};
 
 extern crate rand;
+
+extern crate rayon;
+use rayon::prelude::*;
 
 // Functions related to vectors
 fn random_unit_vector() -> Vector3<f32> {
@@ -440,29 +443,25 @@ impl Camera {
 
         Ray { origin: ray_origin, direction: ray_direction }
     }
-    fn render(&self, image_buffer: &mut BufWriter<Vec<u8>>, world: &HittableList) -> std::io::Result<()> {
-        // Open a progress bar
-        let progress_bar = ProgressBar::new(self.image_height as u64 * self.image_width as u64);
-
-        for j in 0..self.image_height {
-            for i in 0..self.image_width {
+    fn render(&self, image_buffer: &mut BufWriter<Vec<u8>>, world: &HittableList, progress_bar: &ProgressBar) -> std::io::Result<()> {
+        (0..self.image_height).for_each(|j| {
+            (0..self.image_width).for_each(|i| {
                 progress_bar.inc(1);
                 let mut pixel_color = Vector3::<f32>::new(0.0, 0.0, 0.0);
 
-                for _ in 0..self.samples_per_pixel {
+                pixel_color = (0..self.samples_per_pixel).into_iter().map(|_| {
                     let ray = self.get_ray(i, j);
-                    pixel_color += Camera::ray_color(&ray, self.max_depth, world); 
-                }
+                    Camera::ray_color(&ray, self.max_depth, world)
+                }).sum();
 
                 pixel_color *= self.pixel_samples_scale;
 
-                write_color(image_buffer, &pixel_color)?;
-            }
-        }
+                write_color(image_buffer, &pixel_color).unwrap();
+            })
+        });
 
         image_buffer.flush()?;
         progress_bar.finish();
-
         Ok(())
     }
 }
@@ -470,13 +469,11 @@ impl Camera {
 // Main execution function
 fn main() -> std::io::Result<()> {
     // Create the world
-    let mut world = sync::Arc::new(sync::RwLock::new(HittableList { objects: Vec::new() }));
-
-    let mut write = world.write().unwrap();
+    let mut world = HittableList { objects: Vec::new() };
 
     let ground_material = sync::Arc::new(Material::Lambertian(Lambertian { albedo: Vector3::<f32>::new(0.5, 0.5, 0.5) }));
 
-    write.add(Hittable {
+    world.add(Hittable {
         geometry: Geometry::Sphere(Sphere { center: Vector3::<f32>::new(0.0, -1000.0, 0.0), radius: 1000.0 }),
         material: ground_material.clone(),
     });
@@ -511,20 +508,19 @@ fn main() -> std::io::Result<()> {
     let material2 = sync::Arc::new(Material::Lambertian(Lambertian { albedo: Vector3::<f32>::new(0.7, 0.6, 0.5) }));
     let material3 = sync::Arc::new(Material::Metal(Metal { albedo: Vector3::<f32>::new(0.7, 0.6, 0.5), fuzz: 0.0 }));
 
-    write.add(Hittable {
+    world.add(Hittable {
         geometry: Geometry::Sphere(Sphere { center: Vector3::<f32>::new(0.0, 1.0, 0.0), radius: 1.0 }),
         material: material1.clone(),
     });
-    write.add(Hittable {
+    world.add(Hittable {
         geometry: Geometry::Sphere(Sphere { center: Vector3::<f32>::new(-4.0, 1.0, 0.0), radius: 1.0 }),
         material: material2.clone(),
     });
-    write.add(Hittable {
+    world.add(Hittable {
         geometry: Geometry::Sphere(Sphere { center: Vector3::<f32>::new(4.0, 1.0, 0.0), radius: 1.0 }),
         material: material3.clone(),
     });
 
-    mem::drop(write);
 
     // Setup the camera
     let aspect_ratio = 16.0 / 9.0;
@@ -538,20 +534,22 @@ fn main() -> std::io::Result<()> {
     let defocus_angle = 0.6;
     let focus_dist = 10.0;
 
-    let camera = sync::Arc::new(Camera::new(aspect_ratio, image_width, samples_per_pixel, max_depth, vfov, lookfrom, lookat, vup, defocus_angle, focus_dist));
+    let camera = Camera::new(aspect_ratio, image_width, samples_per_pixel, max_depth, vfov, lookfrom, lookat, vup, defocus_angle, focus_dist);
+
+    // Setup the progress bar
+    let progress_bar = ProgressBar::new((image_width * camera.image_height) as u64);
+
+    // Setup the image buffer
+    let mut image_buffer = BufWriter::new(Vec::new());
 
     // Render the image
-    let mut image_buffer0 = BufWriter::new(Vec::new());
-    camera.render(&mut image_buffer0, &world.read().unwrap())?;    
-    
-    // Write the image buffer to the file
-    let mut image_file: BufWriter<File> = BufWriter::new(File::create("image.ppm")?);
+    camera.render(&mut image_buffer, &world, &progress_bar)?;
 
-    image_file.write(format!("P3\n{} {}\n255\n", image_width, camera.image_height).as_bytes())?;
-
-    image_file.write_all(image_buffer0.get_ref())?;
-    
-    image_file.flush()?;
+    // Write the image to a file
+    let mut file = File::create("image.ppm")?;
+    file.write(format!("P3\n{} {}\n255\n", image_width, camera.image_height).as_bytes())?;
+    file.write_all(&image_buffer.get_ref())?;
+    file.flush()?;
 
     Ok(())
 }
