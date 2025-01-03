@@ -449,7 +449,7 @@ impl Camera {
                 progress_bar.inc(1);
                 let mut pixel_color = Vector3::<f32>::new(0.0, 0.0, 0.0);
 
-                pixel_color = (0..self.samples_per_pixel).into_iter().map(|_| {
+                pixel_color = (0..self.samples_per_pixel).into_par_iter().map(|_| {
                     let ray = self.get_ray(i, j);
                     Camera::ray_color(&ray, self.max_depth, world)
                 }).sum();
