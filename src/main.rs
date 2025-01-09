@@ -6,6 +6,7 @@ use std::sync;
 
 
 extern crate nalgebra as na;
+use na::constraint::SameNumberOfRows;
 use na::Vector3;
 
 extern crate indicatif;
@@ -110,6 +111,76 @@ struct Ray {
 impl Ray {
     fn at(&self, t: f32) -> Vector3<f32> {
         self.origin + t * self.direction
+    }
+}
+
+// Functions related to AABBs
+struct AABB {
+    x: Interval,
+    y: Interval,
+    z: Interval
+}
+impl AABB {
+    fn new_blank() -> AABB {
+        AABB {
+            x: Interval::new_blank(),
+            y: Interval::new_blank(),
+            z: Interval::new_blank()
+        }
+    }
+    fn new(x: Interval, y: Interval, z: Interval) -> AABB {
+        AABB {
+            x: x,
+            y: y,
+            z: z
+        }
+    }
+    fn new_from_two_points(a: &Vector3<f32>, b: &Vector3<f32>) -> AABB {
+        AABB {
+            x: Interval { min: a.x.min(b.x), max: a.x.max(b.x) },
+            y: Interval { min: a.y.min(b.y), max: a.y.max(b.y) },
+            z: Interval { min: a.z.min(b.z), max: a.z.max(b.z) },
+        }
+    }
+    fn axis_interval(&self, n: i32) -> Interval {
+        if n == 1 { return self.y.clone() }
+        if n == 2 { return self.z.clone() }
+        self.x.clone()
+    }
+    fn hit(&self, r: &Ray, ray_t: &mut Interval) -> bool {
+        let ray_origin = r.origin;
+        let ray_direction = r.direction;
+
+        for axis in 0..3 {
+            let ax = self.axis_interval(axis);
+            let adinv = 1.0 / match axis {
+                1 => ray_direction.y,
+                2 => ray_direction.z,
+                _ => ray_direction.x
+            };
+
+            let ray_origin_axis = match axis {
+                1 => ray_origin.y,
+                2 => ray_origin.z,
+                _ => ray_origin.x
+            };
+
+            let t0 = (ax.min - ray_origin_axis) * adinv;
+            let t1 = (ax.max - ray_origin_axis) * adinv;
+
+            if t0 < t1 {
+                if t0 > ray_t.min { ray_t.min = t0; }
+                if t1 < ray_t.max { ray_t.max = t1; }
+            } else {
+                if t1 > ray_t.min { ray_t.min = t1; }
+                if t0 < ray_t.max { ray_t.max = t0; }
+            }
+
+            if ray_t.max <= ray_t.min {
+                return false;
+            }
+        }
+        true
     }
 }
 
@@ -338,11 +409,18 @@ struct Metal {
 struct Dielectric {}
 
 // Functions related to intervals
+#[derive(Clone, Copy)]
 struct Interval {
     min: f32,
     max: f32,
 }
 impl Interval {
+    fn new_blank() -> Interval {
+        Interval {
+            min: 0.0,
+            max: 0.0
+        }
+    }
     fn size(&self) -> f32 {
         self.max - self.min
     }
