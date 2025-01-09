@@ -1,9 +1,9 @@
 use core::f32;
 use std::cmp;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{Write, BufWriter};
 use std::sync;
-use std::mem;
+
 
 extern crate nalgebra as na;
 use na::Vector3;
@@ -72,6 +72,36 @@ fn write_color(image_buffer: &mut BufWriter<Vec<u8>>, pixel_color: &Vector3<f32>
     Ok(())
 }
 
+// Functions related to models
+fn import_stl_model(path: &str) -> Vec<Triangle>{
+    let mut file = OpenOptions::new().read(true).open(path).unwrap();
+
+    let stl = stl_io::create_stl_reader(&mut file).unwrap().map(|triangle| {
+        let tri = triangle.expect("error");
+        
+        let vertices: Vec<Vector3<f32>> = tri.vertices.into_iter().map(|vertex| {
+            Vector3::<f32>::new(vertex[0], vertex[1], vertex[2])
+        }).collect();
+
+        let normal = Vector3::<f32>::new(tri.normal[0], tri.normal[1], tri.normal[2]);
+
+        Triangle {
+            vertices: [vertices[0], vertices[1], vertices[2]],
+            normal
+        }
+    }).collect();
+
+    stl
+}
+fn add_model_to_world(world: &mut HittableList, stl_triangles: Vec<Triangle>, material: sync::Arc<Material>) {
+    for tri in stl_triangles {
+        world.add(Hittable {
+            geometry: Geometry::Triangle(tri),
+            material: material.clone()
+        });
+    }
+}
+
 // Function related to rays
 struct Ray {
     origin: Vector3<f32>,
@@ -85,7 +115,8 @@ impl Ray {
 
 // Functions related to geometry
 struct Triangle {
-    pub vertices: [Vector3<f32>; 3],
+    vertices: [Vector3<f32>; 3],
+    normal: Vector3<f32>
 }
 struct Sphere {
         pub center: Vector3<f32>,
@@ -147,8 +178,7 @@ impl Geometry {
                         return false;
                     }
 
-                    let normal = e1.cross(&e2).normalize();
-                    let outward_normal = if ray.direction.dot(&normal) < 0.0 { normal } else { -normal };
+                    let outward_normal = triangle.normal;
 
                     hit_record.t = t;
                     hit_record.p = ray.at(t);
@@ -307,7 +337,6 @@ struct Metal {
 }
 struct Dielectric {}
 
-
 // Functions related to intervals
 struct Interval {
     min: f32,
@@ -330,6 +359,13 @@ impl Interval {
             self.max
         } else {
             value
+        }
+    }
+    fn expand(&self, value: f32) -> Interval {
+        let padding = value / 2.0;
+        Interval {
+            min: self.min - padding,
+            max: self.max + padding
         }
     }
 }
@@ -471,12 +507,21 @@ fn main() -> std::io::Result<()> {
     // Create the world
     let mut world = HittableList { objects: Vec::new() };
 
+    /*
     let ground_material = sync::Arc::new(Material::Lambertian(Lambertian { albedo: Vector3::<f32>::new(0.5, 0.5, 0.5) }));
 
     world.add(Hittable {
         geometry: Geometry::Sphere(Sphere { center: Vector3::<f32>::new(0.0, -1000.0, 0.0), radius: 1000.0 }),
         material: ground_material.clone(),
     });
+    */
+
+
+    let cube_mesh = import_stl_model("./models/cube.stl");
+    let model_material = sync::Arc::new(Material::Lambertian( Lambertian { albedo: Vector3::<f32>::new(1.0, 1.0, 1.0) }));
+
+    add_model_to_world(&mut world, cube_mesh, model_material);
+    
     /*
     for a in -11..11 {
         for b in -11..11 {
@@ -503,7 +548,7 @@ fn main() -> std::io::Result<()> {
             }
         }
     }
-    */
+    
     let material1 = sync::Arc::new(Material::Lambertian(Lambertian { albedo: Vector3::<f32>::new(0.4, 0.2, 0.1) }));
     let material2 = sync::Arc::new(Material::Lambertian(Lambertian { albedo: Vector3::<f32>::new(0.7, 0.6, 0.5) }));
     let material3 = sync::Arc::new(Material::Metal(Metal { albedo: Vector3::<f32>::new(0.7, 0.6, 0.5), fuzz: 0.0 }));
@@ -520,7 +565,7 @@ fn main() -> std::io::Result<()> {
         geometry: Geometry::Sphere(Sphere { center: Vector3::<f32>::new(4.0, 1.0, 0.0), radius: 1.0 }),
         material: material3.clone(),
     });
-
+    */
 
     // Setup the camera
     let aspect_ratio = 16.0 / 9.0;
@@ -531,7 +576,7 @@ fn main() -> std::io::Result<()> {
     let lookfrom = Vector3::<f32>::new(13.0, 2.0, 3.0);
     let lookat = Vector3::<f32>::new(0.0, 0.0, 0.0);
     let vup = Vector3::<f32>::new(0.0, 1.0, 0.0);
-    let defocus_angle = 0.6;
+    let defocus_angle = 0.0;
     let focus_dist = 10.0;
 
     let camera = Camera::new(aspect_ratio, image_width, samples_per_pixel, max_depth, vfov, lookfrom, lookat, vup, defocus_angle, focus_dist);
