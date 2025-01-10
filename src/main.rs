@@ -142,6 +142,20 @@ impl AABB {
             z: Interval { min: a.z.min(b.z), max: a.z.max(b.z) },
         }
     }
+    fn new_from_three_points(a: &Vector3<f32>, b: &Vector3<f32>, c: &Vector3<f32>) -> AABB {
+        AABB {
+            x: Interval { min: a.x.min(b.x.min(c.x)), max: a.x.max(b.x.max(c.x)) },
+            y: Interval { min: a.y.min(b.y.min(c.y)), max: a.y.max(b.y.max(c.y)) },
+            z: Interval { min: a.z.min(b.z.min(c.z)), max: a.z.max(b.z.max(c.z)) },
+        }
+    }
+    fn new_from_two_boxes(box0: &AABB, box1: &AABB) -> AABB {
+        AABB {
+            x: Interval::new_from_intervals(&box0.x, &box1.x),
+            y: Interval::new_from_intervals(&box0.y, &box1.y),
+            z: Interval::new_from_intervals(&box0.z, &box1.z),
+        }
+    }
     fn axis_interval(&self, n: i32) -> Interval {
         if n == 1 { return self.y.clone() }
         if n == 2 { return self.z.clone() }
@@ -199,6 +213,22 @@ enum Geometry {
     Sphere(Sphere),
 }
 impl Geometry {
+    fn calculate_bbox(&self) -> AABB {
+        match self {
+            Geometry::Sphere(sphere) => {
+                let static_center = sphere.center;
+                let rvec = Vector3::<f32>::new(sphere.radius, sphere.radius, sphere.radius);
+
+                let point1 = static_center - rvec;
+                let point2 = static_center + rvec;
+
+                AABB::new_from_two_points(&point1, &point2)
+            },
+            Geometry::Triangle(triangle) => {
+                AABB::new_from_three_points(&triangle.vertices[0], &triangle.vertices[1], &triangle.vertices[2])
+            }
+        }
+    }
     fn hit(&self, ray: &Ray, ray_t: Interval, hit_record: &mut HitRecord) -> bool {
         match self {
             Geometry::Triangle(triangle) => {
@@ -311,8 +341,18 @@ impl HitRecord {
 struct Hittable {
     geometry: Geometry,
     material: sync::Arc<Material>,
+    bbox: AABB
 }
 impl Hittable {
+    fn new(geometry: Geometry, material: sync::Arc<Material>) -> Hittable {
+        let bbox = geometry.calculate_bbox();
+
+        Hittable {
+            geometry,
+            material,
+            bbox
+        }
+    }
     fn hit(&self, ray: &Ray, ray_t: Interval, hit_record: &mut HitRecord) -> bool {
         self.geometry.hit(ray, ray_t, hit_record)
     }
@@ -444,6 +484,12 @@ impl Interval {
         Interval {
             min: self.min - padding,
             max: self.max + padding
+        }
+    }
+    fn new_from_intervals(a: &Interval, b: &Interval) -> Interval {
+        Interval {
+            min: a.min.min(b.min),
+            max: a.max.max(b.max)
         }
     }
 }
