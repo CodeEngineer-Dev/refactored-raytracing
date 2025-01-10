@@ -6,15 +6,15 @@ use std::sync;
 
 
 extern crate nalgebra as na;
-use na::constraint::SameNumberOfRows;
 use na::Vector3;
 
 extern crate indicatif;
-use indicatif::{ProgressBar, MultiProgress};
+use indicatif::{ProgressBar};
 
 extern crate rand;
 
 extern crate rayon;
+use rand::Rng;
 use rayon::prelude::*;
 
 // Functions related to vectors
@@ -96,10 +96,7 @@ fn import_stl_model(path: &str) -> Vec<Triangle>{
 }
 fn add_model_to_world(world: &mut HittableList, stl_triangles: Vec<Triangle>, material: sync::Arc<Material>) {
     for tri in stl_triangles {
-        world.add(Hittable {
-            geometry: Geometry::Triangle(tri),
-            material: material.clone()
-        });
+        world.add(Hittable::new(Geometry::Triangle(tri), material.clone()));
     }
 }
 
@@ -115,6 +112,7 @@ impl Ray {
 }
 
 // Functions related to AABBs
+#[derive(Clone, Copy)]
 struct AABB {
     x: Interval,
     y: Interval,
@@ -137,16 +135,16 @@ impl AABB {
     }
     fn new_from_two_points(a: &Vector3<f32>, b: &Vector3<f32>) -> AABB {
         AABB {
-            x: Interval { min: a.x.min(b.x), max: a.x.max(b.x) },
-            y: Interval { min: a.y.min(b.y), max: a.y.max(b.y) },
-            z: Interval { min: a.z.min(b.z), max: a.z.max(b.z) },
+            x: Interval { min: a.x.min(b.x), max: a.x.max(b.x) }.expand(0.0001),
+            y: Interval { min: a.y.min(b.y), max: a.y.max(b.y) }.expand(0.0001),
+            z: Interval { min: a.z.min(b.z), max: a.z.max(b.z) }.expand(0.0001),
         }
     }
     fn new_from_three_points(a: &Vector3<f32>, b: &Vector3<f32>, c: &Vector3<f32>) -> AABB {
         AABB {
-            x: Interval { min: a.x.min(b.x.min(c.x)), max: a.x.max(b.x.max(c.x)) },
-            y: Interval { min: a.y.min(b.y.min(c.y)), max: a.y.max(b.y.max(c.y)) },
-            z: Interval { min: a.z.min(b.z.min(c.z)), max: a.z.max(b.z.max(c.z)) },
+            x: Interval { min: a.x.min(b.x.min(c.x)), max: a.x.max(b.x.max(c.x)) }.expand(0.0001),
+            y: Interval { min: a.y.min(b.y.min(c.y)), max: a.y.max(b.y.max(c.y)) }.expand(0.0001),
+            z: Interval { min: a.z.min(b.z.min(c.z)), max: a.z.max(b.z.max(c.z)) }.expand(0.0001),
         }
     }
     fn new_from_two_boxes(box0: &AABB, box1: &AABB) -> AABB {
@@ -199,18 +197,85 @@ impl AABB {
 }
 
 // Functions related to geometry
+#[derive(Clone)]
 struct Triangle {
     vertices: [Vector3<f32>; 3],
     normal: Vector3<f32>
 }
+#[derive(Clone)]
 struct Sphere {
         pub center: Vector3<f32>,
         pub radius: f32,
     }
 
+#[derive(Clone)]
+struct BVH_Node {
+    left: Box<Hittable>,
+    right: Box<Hittable>,
+    bbox: AABB
+}
+impl BVH_Node {
+    fn new_from_hittable_list(list: &HittableList) -> BVH_Node {
+        let mut objects = list.objects.clone();
+        let len = list.objects.len();
+        BVH_Node::new_from_vector(&mut objects, 0, len)
+    }
+    fn new_from_vector(objects: &mut [Hittable], start: usize, end: usize) -> BVH_Node {
+        let axis = rand::thread_rng().gen_range(0..3);
+
+        let comparator = if axis == 0 { BVH_Node::box_x_compare } else if axis == 1 { BVH_Node::box_y_compare } else { BVH_Node::box_z_compare };
+
+        let object_span = end - start;
+
+        let left: Box<Hittable>;
+        let right: Box<Hittable>;
+        
+        if object_span == 1 {
+            left = Box::new(objects[start].clone());
+            right = Box::new(objects[start].clone());
+        } else if object_span == 2 {
+            left = Box::new(objects[start].clone());
+            right = Box::new(objects[start + 1].clone());
+        } else {
+            let new_objects = &mut objects[start..end];
+            new_objects.sort_by(comparator);
+
+            let mid = start + object_span / 2;
+            left = Box::new(Hittable::new(Geometry::BVH_Node(BVH_Node::new_from_vector(objects, start, mid)), sync::Arc::new(Material::Blank)));
+            right = Box::new(Hittable::new(Geometry::BVH_Node(BVH_Node::new_from_vector(objects, mid, end)), sync::Arc::new(Material::Blank)));
+        }
+
+        let bbox = AABB::new_from_two_boxes(&left.bbox, &right.bbox);
+
+        BVH_Node {
+            left,
+            right,
+            bbox
+        }
+    }
+
+    fn box_compare(a: &Hittable, b: &Hittable, axis_index: i32) -> cmp::Ordering {
+        let a_axis_interval = a.bbox.axis_interval(axis_index);
+        let b_axis_interval = b.bbox.axis_interval(axis_index);
+
+        a_axis_interval.min.partial_cmp(&b_axis_interval.min).unwrap()
+    }
+    fn box_x_compare(a: &Hittable, b: &Hittable) -> cmp::Ordering {
+        BVH_Node::box_compare(a, b, 0)
+    }
+    fn box_y_compare(a: &Hittable, b: &Hittable) -> cmp::Ordering {
+        BVH_Node::box_compare(a, b, 1)
+    }
+    fn box_z_compare(a: &Hittable, b: &Hittable) -> cmp::Ordering {
+        BVH_Node::box_compare(a, b, 2)
+    }
+}
+
+#[derive(Clone)]
 enum Geometry {
     Triangle(Triangle),
     Sphere(Sphere),
+    BVH_Node(BVH_Node)
 }
 impl Geometry {
     fn calculate_bbox(&self) -> AABB {
@@ -226,6 +291,9 @@ impl Geometry {
             },
             Geometry::Triangle(triangle) => {
                 AABB::new_from_three_points(&triangle.vertices[0], &triangle.vertices[1], &triangle.vertices[2])
+            },
+            Geometry::BVH_Node(bvh_node) => {
+                bvh_node.bbox.clone()
             }
         }
     }
@@ -317,6 +385,77 @@ impl Geometry {
                 hit_record.set_face_normal(ray, outward_normal);
 
                 true
+            },
+            Geometry::BVH_Node(bvh_node) => {
+                false
+            }
+        }
+    }
+    fn hit_bvh(&self, ray: &Ray, ray_t: Interval, hit_record: &mut HitRecord) -> Option<sync::Arc<Material>> {
+        match self {
+            Geometry::BVH_Node(bvh_node) => {
+                let mut ray_t_duplicate = Interval {
+                    min: ray_t.min,
+                    max: ray_t.max
+                };
+                if !bvh_node.bbox.hit(ray, &mut ray_t_duplicate) {
+                    return None;
+                }
+                
+                let mut dupl_rec_1 = HitRecord {
+                    p: hit_record.p,
+                    normal: hit_record.normal,
+                    t: hit_record.t,
+                    front_face: hit_record.front_face,
+                    material: hit_record.material.clone()
+                };
+                let mut dupl_rec_2 = HitRecord {
+                    p: hit_record.p,
+                    normal: hit_record.normal,
+                    t: hit_record.t,
+                    front_face: hit_record.front_face,
+                    material: hit_record.material.clone()
+                };
+
+                let hit_left = bvh_node.left.hit(ray, ray_t, &mut dupl_rec_1);
+                let hit_right = bvh_node.right.hit(ray, ray_t, &mut dupl_rec_2);
+
+                if hit_left.is_some() && hit_right.is_some() {
+                    if dupl_rec_1.t <= dupl_rec_2.t {
+                        hit_record.p = dupl_rec_1.p;
+                        hit_record.normal = dupl_rec_1.normal;
+                        hit_record.t = dupl_rec_1.t;
+                        hit_record.front_face = dupl_rec_1.front_face;
+                        
+                        return hit_left;
+                    } else {
+                        hit_record.p = dupl_rec_2.p;
+                        hit_record.normal = dupl_rec_2.normal;
+                        hit_record.t = dupl_rec_2.t;
+                        hit_record.front_face = dupl_rec_2.front_face;
+
+                        return hit_right;
+                    }
+                } else if hit_left.is_some() {
+                    hit_record.p = dupl_rec_1.p;
+                    hit_record.normal = dupl_rec_1.normal;
+                    hit_record.t = dupl_rec_1.t;
+                    hit_record.front_face = dupl_rec_1.front_face;
+
+                    return hit_left;
+                } else if hit_right.is_some() {
+                    hit_record.p = dupl_rec_2.p;
+                    hit_record.normal = dupl_rec_2.normal;
+                    hit_record.t = dupl_rec_2.t;
+                    hit_record.front_face = dupl_rec_2.front_face;
+
+                    return hit_right;
+                } else {
+                    return None;
+                }
+            }
+            _ => {
+                None
             }
         }
     }
@@ -338,6 +477,7 @@ impl HitRecord {
     }
 }
 
+#[derive(Clone)]
 struct Hittable {
     geometry: Geometry,
     material: sync::Arc<Material>,
@@ -353,17 +493,32 @@ impl Hittable {
             bbox
         }
     }
-    fn hit(&self, ray: &Ray, ray_t: Interval, hit_record: &mut HitRecord) -> bool {
-        self.geometry.hit(ray, ray_t, hit_record)
+    fn hit(&self, ray: &Ray, ray_t: Interval, hit_record: &mut HitRecord) -> Option<sync::Arc<Material>> {
+        match &self.geometry {
+            Geometry::BVH_Node(bvh_node) => {
+                return self.geometry.hit_bvh(ray, ray_t, hit_record);
+            },
+            _ => {
+                if self.geometry.hit(ray, ray_t, hit_record) {
+                    return Some(self.material.clone());
+                } else {
+                    return None;
+                }
+            }
+        }
     }
 }
 
 struct HittableList {
-    objects: Vec<Hittable>
+    objects: Vec<Hittable>,
+    bbox: AABB
 }
 impl HittableList {
     fn add(&mut self, object: Hittable) {
+        let new_bbox = AABB::new_from_two_boxes(&self.bbox, &object.bbox);
+
         self.objects.push(object);
+        self.bbox = new_bbox;
     }
     fn hit(&self, ray: &Ray, ray_t: Interval, hit_record: &mut HitRecord) -> bool {
         let mut temp_record = HitRecord {
@@ -378,14 +533,17 @@ impl HittableList {
         let mut closest_so_far = ray_t.max;
 
         for object in self.objects.iter() {
-            if object.hit(ray, Interval {min: ray_t.min, max: closest_so_far}, &mut temp_record) {
+            match object.hit(ray, Interval {min: ray_t.min, max: closest_so_far}, &mut temp_record) {
+                Some(material) => {
                 hit_anything = true;
                 closest_so_far = temp_record.t;
                 hit_record.p = temp_record.p;
                 hit_record.normal = temp_record.normal;
                 hit_record.t = temp_record.t;
                 hit_record.front_face = temp_record.front_face;
-                hit_record.material = object.material.clone();
+                hit_record.material = material.clone();
+                },
+                None => {}
             }
         }
 
@@ -629,24 +787,20 @@ impl Camera {
 // Main execution function
 fn main() -> std::io::Result<()> {
     // Create the world
-    let mut world = HittableList { objects: Vec::new() };
+    let mut world = HittableList { objects: Vec::new(), bbox: AABB::new_blank() };
 
+    
+    let ground_material = sync::Arc::new(Material::Metal( Metal { albedo: Vector3::<f32>::new(0.5, 0.5, 0.5), fuzz: 0.0 }));
+
+    world.add(Hittable::new(Geometry::Sphere(Sphere { center: Vector3::<f32>::new(0.0, -1000.0, 0.0), radius: 1000.0 }), ground_material.clone()));
+    
     /*
-    let ground_material = sync::Arc::new(Material::Lambertian(Lambertian { albedo: Vector3::<f32>::new(0.5, 0.5, 0.5) }));
-
-    world.add(Hittable {
-        geometry: Geometry::Sphere(Sphere { center: Vector3::<f32>::new(0.0, -1000.0, 0.0), radius: 1000.0 }),
-        material: ground_material.clone(),
-    });
-    */
-
-
     let cube_mesh = import_stl_model("./models/cube.stl");
     let model_material = sync::Arc::new(Material::Lambertian( Lambertian { albedo: Vector3::<f32>::new(1.0, 1.0, 1.0) }));
 
     add_model_to_world(&mut world, cube_mesh, model_material);
+    */
     
-    /*
     for a in -11..11 {
         for b in -11..11 {
             let choose_mat = rand::random::<f32>();
@@ -665,10 +819,12 @@ fn main() -> std::io::Result<()> {
                     sphere_material = sync::Arc::new(Material::Metal(Metal { albedo, fuzz }));
                 }
 
-                world.add(Hittable {
-                    geometry: Geometry::Sphere(Sphere { center, radius: 0.2 }),
-                    material: sphere_material,
-                });
+                world.add(Hittable::new(Geometry::Sphere(
+                    Sphere {
+                        center,
+                        radius: 0.2
+                    }
+                ), sphere_material));
             }
         }
     }
@@ -677,24 +833,34 @@ fn main() -> std::io::Result<()> {
     let material2 = sync::Arc::new(Material::Lambertian(Lambertian { albedo: Vector3::<f32>::new(0.7, 0.6, 0.5) }));
     let material3 = sync::Arc::new(Material::Metal(Metal { albedo: Vector3::<f32>::new(0.7, 0.6, 0.5), fuzz: 0.0 }));
 
-    world.add(Hittable {
-        geometry: Geometry::Sphere(Sphere { center: Vector3::<f32>::new(0.0, 1.0, 0.0), radius: 1.0 }),
-        material: material1.clone(),
-    });
-    world.add(Hittable {
-        geometry: Geometry::Sphere(Sphere { center: Vector3::<f32>::new(-4.0, 1.0, 0.0), radius: 1.0 }),
-        material: material2.clone(),
-    });
-    world.add(Hittable {
-        geometry: Geometry::Sphere(Sphere { center: Vector3::<f32>::new(4.0, 1.0, 0.0), radius: 1.0 }),
-        material: material3.clone(),
-    });
-    */
+    world.add(Hittable::new(Geometry::Sphere(Sphere {
+        center: Vector3::<f32>::new(0.0, 1.0, 0.0),
+        radius: 1.0
+    }), material1));
+    world.add(Hittable::new(Geometry::Sphere(Sphere {
+        center: Vector3::<f32>::new(-4.0, 1.0, 0.0),
+        radius: 1.0
+    }), material2));
+    world.add(Hittable::new(Geometry::Sphere(Sphere {
+        center: Vector3::<f32>::new(4.0, 1.0, 0.0),
+        radius: 1.0
+    }), material3));
+    
+    let bvh_tree = Hittable::new(Geometry::BVH_Node(
+        BVH_Node::new_from_hittable_list(&world)
+    ), sync::Arc::new(Material::Blank));
+
+    let mut world = HittableList {
+        objects: Vec::new(),
+        bbox: AABB::new_blank()
+    };
+
+    world.add(bvh_tree);
 
     // Setup the camera
     let aspect_ratio = 16.0 / 9.0;
     let image_width = 400;
-    let samples_per_pixel = 10;
+    let samples_per_pixel = 100;
     let max_depth = 10;
     let vfov = 20;
     let lookfrom = Vector3::<f32>::new(13.0, 2.0, 3.0);
