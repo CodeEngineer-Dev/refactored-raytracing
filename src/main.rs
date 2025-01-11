@@ -4,12 +4,11 @@ use std::fs::{File, OpenOptions};
 use std::io::{Write, BufWriter};
 use std::sync;
 
-
 extern crate nalgebra as na;
 use na::Vector3;
 
 extern crate indicatif;
-use indicatif::{ProgressBar};
+use indicatif::ProgressBar;
 
 extern crate rand;
 
@@ -790,62 +789,32 @@ fn main() -> std::io::Result<()> {
     let mut world = HittableList { objects: Vec::new(), bbox: AABB::new_blank() };
 
     
-    let ground_material = sync::Arc::new(Material::Metal( Metal { albedo: Vector3::<f32>::new(0.5, 0.5, 0.5), fuzz: 0.0 }));
+    let ground_material = sync::Arc::new(Material::Lambertian( Lambertian { albedo: Vector3::<f32>::new(234.0/255.0, 225.0/255.0, 176.0/255.0) }));
 
-    world.add(Hittable::new(Geometry::Sphere(Sphere { center: Vector3::<f32>::new(0.0, -1000.0, 0.0), radius: 1000.0 }), ground_material.clone()));
+    world.add(Hittable::new(Geometry::Sphere(Sphere { center: Vector3::<f32>::new(0.0, -1000.25, 0.0), radius: 1000.0 }), ground_material.clone()));
     
-    /*
-    let cube_mesh = import_stl_model("./models/cube.stl");
-    let model_material = sync::Arc::new(Material::Lambertian( Lambertian { albedo: Vector3::<f32>::new(1.0, 1.0, 1.0) }));
-
-    add_model_to_world(&mut world, cube_mesh, model_material);
-    */
     
-    for a in -11..11 {
-        for b in -11..11 {
-            let choose_mat = rand::random::<f32>();
+    let dragon_mesh = import_stl_model("./models/dragon.stl");
+    let model_material = sync::Arc::new(Material::Metal( Metal { albedo: Vector3::<f32>::new(0.2, 0.2, 0.2), fuzz: 0.1 }));
 
-            let center = Vector3::<f32>::new(a as f32 + 0.9 * rand::random::<f32>(), 0.2, b as f32 + 0.9 * rand::random::<f32>());
+    add_model_to_world(&mut world, dragon_mesh, model_material);
+    
+    let ball_mat = sync::Arc::new(Material::Metal( Metal {
+        albedo: Vector3::<f32>::new(0.8, 0.0 , 0.0),
+        fuzz: 0.1
+    }));
 
-            if (center - Vector3::<f32>::new(4.0, 0.2, 0.0)).magnitude() > 0.9 {
-                let sphere_material: sync::Arc<Material>;
+    world.add(Hittable::new(Geometry::Sphere(Sphere { center: Vector3::<f32>::new(0.0, -0.15, -0.5), radius: 0.1 }), ball_mat.clone()));
 
-                if choose_mat < 0.8 {
-                    let albedo = Vector3::<f32>::new(rand::random::<f32>() * rand::random::<f32>(), rand::random::<f32>() * rand::random::<f32>(), rand::random::<f32>() * rand::random::<f32>());
-                    sphere_material = sync::Arc::new(Material::Lambertian(Lambertian { albedo }));
-                } else {
-                    let albedo = Vector3::<f32>::new(0.5 * (1.0 + rand::random::<f32>()), 0.5 * (1.0 + rand::random::<f32>()), 0.5 * (1.0 + rand::random::<f32>()));
-                    let fuzz = 0.5 * rand::random::<f32>();
-                    sphere_material = sync::Arc::new(Material::Metal(Metal { albedo, fuzz }));
-                }
-
-                world.add(Hittable::new(Geometry::Sphere(
-                    Sphere {
-                        center,
-                        radius: 0.2
-                    }
-                ), sphere_material));
-            }
+    for i in -12..12 {
+        for j in -12..12 {
+            world.add(Hittable::new(Geometry::Sphere(Sphere {
+                center: Vector3::<f32>::new(i as f32 / 2.5 + (rand::random::<f32>() - 0.5) * 0.3, -0.4, j as f32 / 2.5 + (rand::random::<f32>() - 0.5) * 0.3),
+                radius: 0.2
+            }), ground_material.clone()));
         }
     }
-    
-    let material1 = sync::Arc::new(Material::Lambertian(Lambertian { albedo: Vector3::<f32>::new(0.4, 0.2, 0.1) }));
-    let material2 = sync::Arc::new(Material::Lambertian(Lambertian { albedo: Vector3::<f32>::new(0.7, 0.6, 0.5) }));
-    let material3 = sync::Arc::new(Material::Metal(Metal { albedo: Vector3::<f32>::new(0.7, 0.6, 0.5), fuzz: 0.0 }));
 
-    world.add(Hittable::new(Geometry::Sphere(Sphere {
-        center: Vector3::<f32>::new(0.0, 1.0, 0.0),
-        radius: 1.0
-    }), material1));
-    world.add(Hittable::new(Geometry::Sphere(Sphere {
-        center: Vector3::<f32>::new(-4.0, 1.0, 0.0),
-        radius: 1.0
-    }), material2));
-    world.add(Hittable::new(Geometry::Sphere(Sphere {
-        center: Vector3::<f32>::new(4.0, 1.0, 0.0),
-        radius: 1.0
-    }), material3));
-    
     let bvh_tree = Hittable::new(Geometry::BVH_Node(
         BVH_Node::new_from_hittable_list(&world)
     ), sync::Arc::new(Material::Blank));
@@ -859,15 +828,15 @@ fn main() -> std::io::Result<()> {
 
     // Setup the camera
     let aspect_ratio = 16.0 / 9.0;
-    let image_width = 400;
-    let samples_per_pixel = 100;
-    let max_depth = 10;
-    let vfov = 20;
-    let lookfrom = Vector3::<f32>::new(13.0, 2.0, 3.0);
+    let image_width = 2400;
+    let samples_per_pixel = 200;
+    let max_depth = 100;
+    let vfov = 60;
+    let lookfrom = Vector3::<f32>::new(-1.0, 0.0, -0.5);
     let lookat = Vector3::<f32>::new(0.0, 0.0, 0.0);
     let vup = Vector3::<f32>::new(0.0, 1.0, 0.0);
     let defocus_angle = 0.0;
-    let focus_dist = 10.0;
+    let focus_dist = 2.0;
 
     let camera = Camera::new(aspect_ratio, image_width, samples_per_pixel, max_depth, vfov, lookfrom, lookat, vup, defocus_angle, focus_dist);
 
