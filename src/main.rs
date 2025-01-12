@@ -1,38 +1,45 @@
+/*
+
+I used GitHub Copilot while I was writing this program (that is, until I ran out of completion tokens). It was helpful as a tool. I still did most of the thinking and writing though.
+
+I also used ChatGPT when I had various questions, especially the problem of ray-triangle intersection. I was struggling to understand the math behind the Moller-Trumbore algorithm, and used it to generate step-by-step instructions on how to implement the algorithm.
+
+*/
+
 use core::f32;
 use std::cmp;
 use std::fs::{File, OpenOptions};
 use std::io::{Write, BufWriter};
 use std::sync;
 
+// Vector library
 extern crate nalgebra as na;
 use na::Vector3;
 
+// Progress bar library
 extern crate indicatif;
 use indicatif::ProgressBar;
 
+// Random number library
 extern crate rand;
-
-extern crate rayon;
 use rand::Rng;
+
+// Parallelism library
+extern crate rayon;
 use rayon::prelude::*;
 
 // Functions related to vectors
 fn random_unit_vector() -> Vector3<f32> {
+    // Generates a random unit vector
     loop {
         let vector = Vector3::<f32>::new(rand::random::<f32>() * 2.0 - 1.0, rand::random::<f32>() * 2.0 - 1.0, rand::random::<f32>() * 2.0 - 1.0);
         let lensq = vector.magnitude_squared();
 
+        // Makes sure that the vector is in the unit circle before normalizing
+        // Otherwise we'd get a more "boxed" distribution of unit vector
         if f32::MIN_POSITIVE < lensq && lensq < 1.0 {
             return vector / lensq;
         }
-    }
-}
-fn random_on_hemisphere(normal: &Vector3<f32>) -> Vector3<f32> {
-    let vector = random_unit_vector();
-    if vector.dot(normal) > 0.0 {
-        vector
-    } else {
-        -vector
     }
 }
 fn near_zero(vector: &Vector3<f32>) -> bool {
@@ -40,9 +47,11 @@ fn near_zero(vector: &Vector3<f32>) -> bool {
     vector.x.abs() < s && vector.y.abs() < s && vector.z.abs() < s
 }
 fn reflect(vector: &Vector3<f32>, normal: &Vector3<f32>) -> Vector3<f32> {
+    // Reflects a vector around a normal
     vector - 2.0 * vector.dot(normal) * normal
 }
 fn random_in_unit_disk() -> Vector3<f32> {
+    // Generates a random value in a unit disk
     loop {
         let vector = Vector3::<f32>::new(rand::random::<f32>() * 2.0 - 1.0, rand::random::<f32>() * 2.0 - 1.0, 0.0);
         let lensq = vector.magnitude_squared();
@@ -53,11 +62,13 @@ fn random_in_unit_disk() -> Vector3<f32> {
     }
 }
 
-// Functions related to color
+// Functions related to coloring
 fn linear_to_gamma(value: f32) -> f32 {
+    // Converts from linear space to gamma space
     value.sqrt()
 }
 fn write_color(image_buffer: &mut BufWriter<Vec<u8>>, pixel_color: &Vector3<f32>) -> std::io::Result<()> {
+    // Writes a color value to a buffer
     let r = linear_to_gamma(pixel_color.x);
     let g = linear_to_gamma(pixel_color.y);
     let b = linear_to_gamma(pixel_color.z);
@@ -72,10 +83,12 @@ fn write_color(image_buffer: &mut BufWriter<Vec<u8>>, pixel_color: &Vector3<f32>
     Ok(())
 }
 
-// Functions related to models
+// Functions related to mesh and modeling
 fn import_stl_model(path: &str) -> Vec<Triangle>{
+    // Open the file
     let mut file = OpenOptions::new().read(true).open(path).unwrap();
 
+    // Takes all the triangles and maps them into my own triangle struct
     let stl = stl_io::create_stl_reader(&mut file).unwrap().map(|triangle| {
         let tri = triangle.expect("error");
         
@@ -94,12 +107,13 @@ fn import_stl_model(path: &str) -> Vec<Triangle>{
     stl
 }
 fn add_model_to_world(world: &mut HittableList, stl_triangles: Vec<Triangle>, material: sync::Arc<Material>) {
+    // Adds each individual triangle of a vector of Triangles to the world
     for tri in stl_triangles {
         world.add(Hittable::new(Geometry::Triangle(tri), material.clone()));
     }
 }
 
-// Function related to rays
+// Functions related to rays
 struct Ray {
     origin: Vector3<f32>,
     direction: Vector3<f32>,
@@ -110,7 +124,7 @@ impl Ray {
     }
 }
 
-// Functions related to AABBs
+// Functions related to AABBs (axis-aligned bounding boxes)
 #[derive(Clone, Copy)]
 struct AABB {
     x: Interval,
@@ -123,13 +137,6 @@ impl AABB {
             x: Interval::new_blank(),
             y: Interval::new_blank(),
             z: Interval::new_blank()
-        }
-    }
-    fn new(x: Interval, y: Interval, z: Interval) -> AABB {
-        AABB {
-            x: x,
-            y: y,
-            z: z
         }
     }
     fn new_from_two_points(a: &Vector3<f32>, b: &Vector3<f32>) -> AABB {
@@ -201,6 +208,7 @@ struct Triangle {
     vertices: [Vector3<f32>; 3],
     normal: Vector3<f32>
 }
+
 #[derive(Clone)]
 struct Sphere {
         pub center: Vector3<f32>,
@@ -208,21 +216,23 @@ struct Sphere {
     }
 
 #[derive(Clone)]
-struct BVH_Node {
+struct BvhNode {
     left: Box<Hittable>,
     right: Box<Hittable>,
     bbox: AABB
 }
-impl BVH_Node {
-    fn new_from_hittable_list(list: &HittableList) -> BVH_Node {
+impl BvhNode {
+    fn new_from_hittable_list(list: &HittableList) -> BvhNode {
         let mut objects = list.objects.clone();
         let len = list.objects.len();
-        BVH_Node::new_from_vector(&mut objects, 0, len)
+        BvhNode::new_from_vector(&mut objects, 0, len)
     }
-    fn new_from_vector(objects: &mut [Hittable], start: usize, end: usize) -> BVH_Node {
+    fn new_from_vector(objects: &mut [Hittable], start: usize, end: usize) -> BvhNode {
+        // This function takes a mutable reference to a part of a vector and keeps splitting it up until there are two or less elements left.
+        // It then clones the elements in the vector and stores a pointer to those copies in its own left and right nodes.
         let axis = rand::thread_rng().gen_range(0..3);
 
-        let comparator = if axis == 0 { BVH_Node::box_x_compare } else if axis == 1 { BVH_Node::box_y_compare } else { BVH_Node::box_z_compare };
+        let comparator = if axis == 0 { BvhNode::box_x_compare } else if axis == 1 { BvhNode::box_y_compare } else { BvhNode::box_z_compare };
 
         let object_span = end - start;
 
@@ -240,13 +250,13 @@ impl BVH_Node {
             new_objects.sort_by(comparator);
 
             let mid = start + object_span / 2;
-            left = Box::new(Hittable::new(Geometry::BVH_Node(BVH_Node::new_from_vector(objects, start, mid)), sync::Arc::new(Material::Blank)));
-            right = Box::new(Hittable::new(Geometry::BVH_Node(BVH_Node::new_from_vector(objects, mid, end)), sync::Arc::new(Material::Blank)));
+            left = Box::new(Hittable::new(Geometry::BvhNode(BvhNode::new_from_vector(objects, start, mid)), sync::Arc::new(Material::Blank)));
+            right = Box::new(Hittable::new(Geometry::BvhNode(BvhNode::new_from_vector(objects, mid, end)), sync::Arc::new(Material::Blank)));
         }
 
         let bbox = AABB::new_from_two_boxes(&left.bbox, &right.bbox);
 
-        BVH_Node {
+        BvhNode {
             left,
             right,
             bbox
@@ -260,21 +270,22 @@ impl BVH_Node {
         a_axis_interval.min.partial_cmp(&b_axis_interval.min).unwrap()
     }
     fn box_x_compare(a: &Hittable, b: &Hittable) -> cmp::Ordering {
-        BVH_Node::box_compare(a, b, 0)
+        BvhNode::box_compare(a, b, 0)
     }
     fn box_y_compare(a: &Hittable, b: &Hittable) -> cmp::Ordering {
-        BVH_Node::box_compare(a, b, 1)
+        BvhNode::box_compare(a, b, 1)
     }
     fn box_z_compare(a: &Hittable, b: &Hittable) -> cmp::Ordering {
-        BVH_Node::box_compare(a, b, 2)
+        BvhNode::box_compare(a, b, 2)
     }
 }
 
 #[derive(Clone)]
 enum Geometry {
+    // A BVH node is a considered to be a Geometry so that it can be a Hittable object.
     Triangle(Triangle),
     Sphere(Sphere),
-    BVH_Node(BVH_Node)
+    BvhNode(BvhNode)
 }
 impl Geometry {
     fn calculate_bbox(&self) -> AABB {
@@ -291,16 +302,19 @@ impl Geometry {
             Geometry::Triangle(triangle) => {
                 AABB::new_from_three_points(&triangle.vertices[0], &triangle.vertices[1], &triangle.vertices[2])
             },
-            Geometry::BVH_Node(bvh_node) => {
+            Geometry::BvhNode(bvh_node) => {
                 bvh_node.bbox.clone()
             }
         }
     }
+    
+    // BvhNodes have different hit functions than other geometries
+
     fn hit(&self, ray: &Ray, ray_t: Interval, hit_record: &mut HitRecord) -> bool {
         match self {
             Geometry::Triangle(triangle) => {
-                // This function uses the Moller-Trumbore algorithm to calculate the
-                // intersection between a ray and a triangle.
+                // This function uses the Moller-Trumbore algorithm to calculate the intersection between a ray and a triangle.
+                // I used ChatGPT to help me with this function, because I was having trouble figuring it out.
 
                 let v1 = triangle.vertices[0];
                 let v2 = triangle.vertices[1];
@@ -341,7 +355,6 @@ impl Geometry {
                 // Make sure that the triangle is in front of the ray
                 // and that the intersection is inside the triangle
                 if t > 0.0 && u >= 0.0 && u <= 1.0 && v >= 0.0 && v <= 1.0 && u + v <= 1.0 {
-
                     if !ray_t.surrounds(t) {
                         return false;
                     }
@@ -385,14 +398,14 @@ impl Geometry {
 
                 true
             },
-            Geometry::BVH_Node(bvh_node) => {
+            Geometry::BvhNode(_) => {
                 false
             }
         }
     }
     fn hit_bvh(&self, ray: &Ray, ray_t: Interval, hit_record: &mut HitRecord) -> Option<sync::Arc<Material>> {
         match self {
-            Geometry::BVH_Node(bvh_node) => {
+            Geometry::BvhNode(bvh_node) => {
                 let mut ray_t_duplicate = Interval {
                     min: ray_t.min,
                     max: ray_t.max
@@ -462,6 +475,7 @@ impl Geometry {
 
 // Functions related to anything hittable
 struct HitRecord {
+    // Hit records simply store information about a ray's intersection
     p: Vector3<f32>,
     normal: Vector3<f32>,
     t: f32,
@@ -471,6 +485,7 @@ struct HitRecord {
 impl HitRecord {
     fn set_face_normal(&mut self, ray: &Ray, outward_normal: Vector3<f32>) {
         // Normals will always point against the incident ray
+        // So we need to determine and set which side of the surface we hit
         self.front_face = ray.direction.dot(&outward_normal) < 0.0;
         self.normal = if self.front_face { outward_normal } else { -outward_normal };
     }
@@ -478,6 +493,7 @@ impl HitRecord {
 
 #[derive(Clone)]
 struct Hittable {
+    // This is the struct for Hittable objects
     geometry: Geometry,
     material: sync::Arc<Material>,
     bbox: AABB
@@ -493,8 +509,11 @@ impl Hittable {
         }
     }
     fn hit(&self, ray: &Ray, ray_t: Interval, hit_record: &mut HitRecord) -> Option<sync::Arc<Material>> {
+        // BvhNode have a different hit function than other geometries.
+        // This is because a BvhNode needs to return the Material type of its child, not of itself.
+        // The other types can return their material types to be propagated up the BVH tree.
         match &self.geometry {
-            Geometry::BVH_Node(bvh_node) => {
+            Geometry::BvhNode(_) => {
                 return self.geometry.hit_bvh(ray, ray_t, hit_record);
             },
             _ => {
@@ -509,6 +528,7 @@ impl Hittable {
 }
 
 struct HittableList {
+    // This struct stores a list of hittable objects
     objects: Vec<Hittable>,
     bbox: AABB
 }
@@ -532,15 +552,16 @@ impl HittableList {
         let mut closest_so_far = ray_t.max;
 
         for object in self.objects.iter() {
+            // If a material was returned, something was hit.
             match object.hit(ray, Interval {min: ray_t.min, max: closest_so_far}, &mut temp_record) {
                 Some(material) => {
-                hit_anything = true;
-                closest_so_far = temp_record.t;
-                hit_record.p = temp_record.p;
-                hit_record.normal = temp_record.normal;
-                hit_record.t = temp_record.t;
-                hit_record.front_face = temp_record.front_face;
-                hit_record.material = material.clone();
+                    hit_anything = true;
+                    closest_so_far = temp_record.t;
+                    hit_record.p = temp_record.p;
+                    hit_record.normal = temp_record.normal;
+                    hit_record.t = temp_record.t;
+                    hit_record.front_face = temp_record.front_face;
+                    hit_record.material = material.clone();
                 },
                 None => {}
             }
@@ -552,10 +573,10 @@ impl HittableList {
 
 // Functions related to materials
 enum Material {
+    // A Blank material exists so that BvhNodes can be Hittables without actually having a real material type.
     Blank,
     Lambertian(Lambertian),
     Metal(Metal),
-    Dielectric(Dielectric),
 }
 impl Material {
     fn scatter(&self, ray: &Ray, hit_record: &HitRecord, attenuation: &mut Vector3<f32>, scattered: &mut Ray) -> bool {
@@ -589,21 +610,19 @@ impl Material {
 
                 return scattered.direction.dot(&hit_record.normal) > 0.0;
             },
-            Material::Dielectric(dielectric) => {
-                return false;
-            }
         }
     }
 }
 
 struct Lambertian {
+    // Lambertian is a diffuse material
     albedo: Vector3<f32>,
 }
 struct Metal {
+    // Metal has reflection
     albedo: Vector3<f32>,
     fuzz: f32,
 }
-struct Dielectric {}
 
 // Functions related to intervals
 #[derive(Clone, Copy)]
@@ -617,12 +636,6 @@ impl Interval {
             min: 0.0,
             max: 0.0
         }
-    }
-    fn size(&self) -> f32 {
-        self.max - self.min
-    }
-    fn contains(&self, value: f32) -> bool {
-        self.min <= value && value <= self.max
     }
     fn surrounds(&self, value: f32) -> bool {
         self.min < value && value < self.max
@@ -742,6 +755,8 @@ impl Camera {
     
         let unit_direction = ray.direction.normalize();
         let t = 0.5 * (unit_direction.y + 1.0);
+
+        // Default sky color if nothing is hit
         (1.0 - t) * Vector3::<f32>::new(1.0, 1.0, 1.0) + t * Vector3::<f32>::new(0.5, 0.7, 1.0)
     }
     fn sample_square() -> Vector3<f32> {
@@ -764,8 +779,9 @@ impl Camera {
         (0..self.image_height).for_each(|j| {
             (0..self.image_width).for_each(|i| {
                 progress_bar.inc(1);
-                let mut pixel_color = Vector3::<f32>::new(0.0, 0.0, 0.0);
+                let mut pixel_color: Vector3<f32>;
 
+                // The parallelization is of the number of rays being sent into a single pixel
                 pixel_color = (0..self.samples_per_pixel).into_par_iter().map(|_| {
                     let ray = self.get_ray(i, j);
                     Camera::ray_color(&ray, self.max_depth, world)
@@ -788,24 +804,12 @@ fn main() -> std::io::Result<()> {
     // Create the world
     let mut world = HittableList { objects: Vec::new(), bbox: AABB::new_blank() };
 
-    
+    // Create the ground
     let ground_material = sync::Arc::new(Material::Lambertian( Lambertian { albedo: Vector3::<f32>::new(234.0/255.0, 225.0/255.0, 176.0/255.0) }));
 
     world.add(Hittable::new(Geometry::Sphere(Sphere { center: Vector3::<f32>::new(0.0, -1000.25, 0.0), radius: 1000.0 }), ground_material.clone()));
     
-    
-    let dragon_mesh = import_stl_model("./models/dragon.stl");
-    let model_material = sync::Arc::new(Material::Metal( Metal { albedo: Vector3::<f32>::new(0.2, 0.2, 0.2), fuzz: 0.1 }));
-
-    add_model_to_world(&mut world, dragon_mesh, model_material);
-    
-    let ball_mat = sync::Arc::new(Material::Metal( Metal {
-        albedo: Vector3::<f32>::new(0.8, 0.0 , 0.0),
-        fuzz: 0.1
-    }));
-
-    world.add(Hittable::new(Geometry::Sphere(Sphere { center: Vector3::<f32>::new(0.0, -0.15, -0.5), radius: 0.1 }), ball_mat.clone()));
-
+    // Tiny little "sand bumps"
     for i in -12..12 {
         for j in -12..12 {
             world.add(Hittable::new(Geometry::Sphere(Sphere {
@@ -814,16 +818,29 @@ fn main() -> std::io::Result<()> {
             }), ground_material.clone()));
         }
     }
+    
+    // Load in the dragon model
+    let dragon_mesh = import_stl_model("./models/dragon.stl");
+    let model_material = sync::Arc::new(Material::Metal( Metal { albedo: Vector3::<f32>::new(0.2, 0.2, 0.2), fuzz: 0.1 }));
+    add_model_to_world(&mut world, dragon_mesh, model_material);
+    
+    // The dragon's red shiny ball
+    let ball_mat = sync::Arc::new(Material::Metal( Metal {
+        albedo: Vector3::<f32>::new(0.8, 0.0 , 0.0),
+        fuzz: 0.1
+    }));
+    world.add(Hittable::new(Geometry::Sphere(Sphere { center: Vector3::<f32>::new(0.0, -0.15, -0.5), radius: 0.1 }), ball_mat.clone()));
 
-    let bvh_tree = Hittable::new(Geometry::BVH_Node(
-        BVH_Node::new_from_hittable_list(&world)
+    // Construct the BVH tree
+    let bvh_tree = Hittable::new(Geometry::BvhNode(
+        BvhNode::new_from_hittable_list(&world)
     ), sync::Arc::new(Material::Blank));
 
+    // Remake the world with the BVH tree as the only Hittable object.
     let mut world = HittableList {
         objects: Vec::new(),
         bbox: AABB::new_blank()
     };
-
     world.add(bvh_tree);
 
     // Setup the camera
@@ -855,5 +872,6 @@ fn main() -> std::io::Result<()> {
     file.write_all(&image_buffer.get_ref())?;
     file.flush()?;
 
+    // Our program is finished!
     Ok(())
 }
