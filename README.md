@@ -2,6 +2,8 @@
 #### Video Demo:
 #### Description: A simple raytracer implemented in Rust based on "Raytracing in One Weekend."
 
+![image](https://github.com/user-attachments/assets/8507e9db-37ba-4aa1-9f46-5348af4aa03c)
+
 ## Background
 
 This raytracer was written for the final project of Harvard CS50x (https://cs50.harvard.edu/x/). My initial exposure to programming was making little games in ProcessingJS. I have always liked the idea of 3D graphics but found it intimidating. This project was a chance for me to delve into that field a little deeper and learn about how 3D works. 
@@ -43,5 +45,4 @@ But I'll have to save them for some other time.
 
 Thanks for reading this!
 
-Here's the scene that is currently set up in this program:
 ![image2](https://github.com/user-attachments/assets/be7435eb-0d58-459e-9032-e8c690753f85)
