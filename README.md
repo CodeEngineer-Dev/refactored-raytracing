@@ -1,6 +1,6 @@
 # Ray Tracing in Rust
 #### Video Demo: https://youtu.be/NpVQilrxkjg
-#### Description: A simple raytracer implemented in Rust based on ("Raytracing in One Weekend")[https://raytracing.github.io]
+#### Description: A simple raytracer implemented in Rust based on "[Raytracing in One Weekend](https://raytracing.github.io)"
 
 ![image](https://github.com/user-attachments/assets/8507e9db-37ba-4aa1-9f46-5348af4aa03c)
 
@@ -29,7 +29,7 @@ I also added some features that were not specifically covered in Shirley's book:
 
 The biggest upgrade in the second project was the implementation of a Bounding Volume Hierarchy (BVH), however. Originally, every single ray was checking for intersection with every shape in the scene. A low-resolution image (400-pixel width, 10 rays per pixel) has 900,000 rays to check collisions with every shape in the scene. And even low-poly triangle meshes still have many triangles in them. This really adds up when it comes to rendering speed.
 
-A BVH sorts all the objects of the scene into a binary search tree. This changes runtime from linear to logarithmic and provides an incredible speed boost when it comes to ray-intersection checking. For example, before implementing BVH, I rendered a super high quality scene; it took about 21 hours. After BVH, a similar scene with similar image quality took *less than one hour*. Tremendous improvement! And with BVH, the raytracer is able to handle the Stanford dragon model (80K triangles; courtesy of (Sebastian Lague)[https://github.com/SebLague/Ray-Tracing/tree/main/Assets/Graphics]; the knight model also comes from him) in a reasonable amount of time.
+A BVH sorts all the objects of the scene into a binary search tree. This changes runtime from linear to logarithmic and provides an incredible speed boost when it comes to ray-intersection checking. For example, before implementing BVH, I rendered a super high quality scene; it took about 21 hours. After BVH, a similar scene with similar image quality took *less than one hour*. Tremendous improvement! And with BVH, the raytracer is able to handle the Stanford dragon model (80K triangles; courtesy of [Sebastian Lague](https://github.com/SebLague/Ray-Tracing/tree/main/Assets/Graphics); the knight model also comes from him) in a reasonable amount of time.
 
 ## Concluding Thoughts
 
